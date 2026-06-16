@@ -50,10 +50,10 @@ POINT_CLOUD_REGISTER_POINT_STRUCT(ouster_ros::Point,
   (float, intensity, intensity)
   // use std::uint32_t to avoid conflicting with pcl::uint32_t
   (std::uint32_t, t, t)
-  // (std::uint16_t, reflectivity, reflectivity)
+  (std::uint16_t, reflectivity, reflectivity)
   // (std::uint8_t, ring, ring)
   // (std::uint16_t, ambient, ambient)
-  // (std::uint32_t, range, range)
+  (std::uint32_t, range, range)
 )
 
 namespace xt32_ros {
@@ -266,7 +266,7 @@ public:
       ap.x = pl_orig.points[i].x;
       ap.y = pl_orig.points[i].y;
       ap.z = pl_orig.points[i].z;
-      ap.intensity = pl_orig[i].intensity;
+      ap.intensity = pl_orig[i].reflectivity;
       // ap.curvature = pl_orig[i].t / float(1e6); // ms
       ap.curvature = pl_orig[i].t / float(1e9); // s
 

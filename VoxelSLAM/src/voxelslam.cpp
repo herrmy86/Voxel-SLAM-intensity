@@ -1,5 +1,4 @@
 #include "voxelslam.hpp"
-
 using namespace std;
 
 class ResultOutput
@@ -158,6 +157,30 @@ public:
   {
     static FileReaderWriter inst;
     return inst;
+  }
+
+  void save_undistorted_pcd(pcl::PointCloud<PointType> &pl, IMUST &xx, int count, const string &savename)  
+  {  
+    if(pl.empty()) return;  
+
+    // Ensure output directory exists.
+    // ensure output directory exists (portable with older C++ standards)
+    {
+      std::string cmd = std::string("mkdir -p \"") + savename + "\"";
+      (void)system(cmd.c_str());
+    }
+pcl::PointCloud<pcl::PointXYZI> pl_save;  
+    for(PointType &ap: pl.points)  
+    {  
+      pcl::PointXYZI pt;  
+      pt.x = ap.x;  
+      pt.y = ap.y;  
+      pt.z = ap.z;  
+      pt.intensity = ap.intensity;  
+      pl_save.push_back(pt);  
+    }  
+    string pcdname = savename + "/" + to_string(count) + ".pcd";  
+    pcl::io::savePCDFileASCII(pcdname, pl_save);  
   }
 
   void save_pcd(PVecPtr pptr, IMUST &xx, int count, const string &savename)
@@ -543,7 +566,7 @@ public:
       pos_imu = head.p;
       angvel_avr = head.bg;
 
-      for(; it_pcl->curvature > head.t; it_pcl--)
+      while(it_pcl >= pl.begin() && it_pcl->curvature > head.t)
       {
         double dt = it_pcl->curvature - head.t;
         Eigen::Matrix3d R_i = R_imu * Exp(angvel_avr, dt);
@@ -554,7 +577,11 @@ public:
 
         pv.pnt = P_compensate;
         pvec.push_back(pv);
-        if(it_pcl == pl.begin()) break;
+       if(it_pcl == pl.begin()) {
+            it_pcl = pl.end(); // Sentinel to stop further processing
+            break; 
+        }
+        it_pcl--;
       }
 
     }
@@ -748,6 +775,12 @@ public:
 
   vector<vector<ScanPose*>*> multimap_scanPoses;
   vector<vector<Keyframe*>*> multimap_keyframes;
+  vector<pcl::PointCloud<PointType>::Ptr> pl_origs;  
+  vector<double> beg_times;
+  vector<deque<sensor_msgs::Imu::Ptr>> vec_imus;
+  // Undistorted (IMU-deskewed) raw point clouds aligned with x_buf/pvec_buf.
+  // Used for exporting unfiltered deskewed frames without interfering with initialization.
+  vector<pcl::PointCloud<PointType>::Ptr> undist_buf;
   volatile int gba_flag = 0;
   int gba_size = 0;
   vector<int> cnct_map;
@@ -758,6 +791,8 @@ public:
   vector<string> sessionNames;
   string bagname, savepath;
   int is_save_map;
+  int is_save_undistorted; 
+  string undistorted_folder; 
 
   VOXEL_SLAM(ros::NodeHandle &n)
   {
@@ -769,14 +804,16 @@ public:
     string lid_topic, imu_topic;
     n.param<string>("General/lid_topic", lid_topic, "/livox/lidar");
     n.param<string>("General/imu_topic", imu_topic, "/livox/imu");
-    n.param<string>("General/bagname", bagname, "site3_handheld_4");
-    n.param<string>("General/save_path", savepath, "");
+    n.param<string>("General/bagname", bagname, "voxel_bag");
+    n.param<string>("General/save_path", savepath, "~/out");
     n.param<int>("General/lidar_type", feat.lidar_type, 0);
     n.param<double>("General/blind", feat.blind, 0.1);
     n.param<int>("General/point_filter_num", feat.point_filter_num, 3);
     n.param<vector<double>>("General/extrinsic_tran", vecT, vector<double>());
     n.param<vector<double>>("General/extrinsic_rota", vecR, vector<double>());
     n.param<int>("General/is_save_map", is_save_map, 0);
+    n.param<int>("General/is_save_undistorted", is_save_undistorted, 0);  
+    n.param<string>("General/undistorted_folder", undistorted_folder, "undistorted");
 
     sub_imu = n.subscribe(imu_topic, 80000, imu_handler);
     if(feat.lidar_type == LIVOX)
@@ -835,7 +872,7 @@ public:
     int ss = 0;
     if(access((savepath+bagname+"/").c_str(), X_OK) == -1)
     {
-      string cmd = "mkdir " + savepath + bagname + "/";
+      string cmd = "mkdir -p " + savepath + bagname + "/";
       ss = system(cmd.c_str());
     }
     else
@@ -847,10 +884,18 @@ public:
       printf("So please clear or rename the existed folder.\n"); 
       exit(0);
     }
-
-    sws.resize(thread_num);
-    cout << "bagname: " << bagname << endl;
-  }
+    if(is_save_undistorted == 1)  
+    {  
+      string undist_path = savepath + bagname + "/" + undistorted_folder + "/";  
+      if(access(undist_path.c_str(), X_OK) == -1)  
+      {  
+        string cmd = "mkdir -p " + undist_path;  
+        system(cmd.c_str());  
+      }  
+    }
+        sws.resize(thread_num);
+        cout << "bagname: " << bagname << endl;
+      }
 
   // The point-to-plane alignment for odometry
   bool lio_state_estimation(PVecPtr pptr)
@@ -1229,13 +1274,18 @@ public:
 
   int initialization(deque<sensor_msgs::Imu::Ptr> &imus, Eigen::MatrixXd &hess, LidarFactor &voxhess, PLV(3) &pwld, pcl::PointCloud<PointType>::Ptr pcl_curr)
   {
-    static vector<pcl::PointCloud<PointType>::Ptr> pl_origs;
-    static vector<double> beg_times;
-    static vector<deque<sensor_msgs::Imu::Ptr>> vec_imus;
+    // NOTE:
+    // Use the VOXEL_SLAM member buffers (pl_origs / beg_times / vec_imus).
+    // Do NOT shadow them with local statics; the undistorted export path relies
+    // on these member buffers being populated.
 
     pcl::PointCloud<PointType>::Ptr orig(new pcl::PointCloud<PointType>(*pcl_curr));
     if(odom_ekf.process(x_curr, *pcl_curr, imus) == 0)
       return 0;
+
+    // Save an unfiltered, IMU-deskewed copy of the current frame for optional export.
+    // odom_ekf.process(...) produces the deskewed cloud in *pcl_curr.
+    undist_buf.push_back(pcl::PointCloud<PointType>::Ptr(new pcl::PointCloud<PointType>(*pcl_curr)));
 
     if(win_count == 0)
       imupre_scale_gravity = odom_ekf.scale_gravity;
@@ -1307,6 +1357,11 @@ public:
     for(int i=0; i<imu_pre_buf.size(); i++)
       delete imu_pre_buf[i];
     x_buf.clear(); pvec_buf.clear(); imu_pre_buf.clear();
+    // Also reset initialization/undistorted-export buffers.
+    pl_origs.clear();
+    beg_times.clear();
+    vec_imus.clear();
+    undist_buf.clear();
     pl_tree->clear();
 
     for(int i=0; i<win_size; i++)
@@ -1464,9 +1519,7 @@ public:
     pcl::PointCloud<PointType>::Ptr pcl_curr(new pcl::PointCloud<PointType>());
     int motion_init_flag = 1;
     pl_tree.reset(new pcl::PointCloud<PointType>());
-    vector<pcl::PointCloud<PointType>::Ptr> pl_origs;
-    vector<double> beg_times;
-    vector<deque<sensor_msgs::Imu::Ptr>> vec_imus;
+    // Use member buffers pl_origs / beg_times / vec_imus. Do not shadow here.
     bool release_flag = false;
     int degrade_cnt = 0;
     LidarFactor voxhess(win_size);
@@ -1571,6 +1624,9 @@ public:
         if(odom_ekf.process(x_curr, *pcl_curr, imus) == 0)
           continue;
 
+        // Keep an unfiltered, IMU-deskewed copy aligned with x_buf/pvec_buf for export.
+        undist_buf.push_back(pcl::PointCloud<PointType>::Ptr(new pcl::PointCloud<PointType>(*pcl_curr)));
+
         pcl::PointCloud<PointType> pl_down = *pcl_curr;
         down_sampling_voxel(pl_down, down_size);
 
@@ -1666,6 +1722,8 @@ public:
 
         ResultOutput::instance().pub_localmap(mgsize, sessionNames.size()-1, pvec_buf, x_buf, pcl_path, win_base, win_count);
 
+
+
         multi_margi(surf_map_slide, jour, win_count, x_buf, voxhess, sws[0]);
         t6 = ros::Time::now().toSec();
 
@@ -1680,6 +1738,21 @@ public:
           }
         }
 
+        if(is_save_undistorted)  
+        {  
+          // Export the unfiltered, IMU-deskewed frame(s) being marginalized from the window.
+          // These are stored in undist_buf in lockstep with x_buf/pvec_buf.
+          int n = std::min<int>(mgsize, (int)undist_buf.size());
+          for(int i=0; i<n; i++)
+          {
+            if(undist_buf[i] && !undist_buf[i]->empty())
+              FileReaderWriter::instance().save_undistorted_pcd(
+                *undist_buf[i], x_buf[i], win_base + i,
+                savepath + bagname + "/" + undistorted_folder
+              );
+          }
+        }
+        
         if(is_save_map)
         {
           for(int i=0; i<mgsize; i++)
@@ -1698,12 +1771,17 @@ public:
           PVecPtr pvec_tem = pvec_buf[i-mgsize];
           pvec_buf[i-mgsize] = pvec_buf[i];
           pvec_buf[i] = pvec_tem;
+
+          pcl::PointCloud<PointType>::Ptr undist_tem = undist_buf[i-mgsize];
+          undist_buf[i-mgsize] = undist_buf[i];
+          undist_buf[i] = undist_tem;
         }
 
         for(int i=win_count-mgsize; i<win_count; i++)
         {
           x_buf.pop_back();
           pvec_buf.pop_back();
+          if(!undist_buf.empty()) undist_buf.pop_back();
 
           delete imu_pre_buf.front();
           imu_pre_buf.pop_front();

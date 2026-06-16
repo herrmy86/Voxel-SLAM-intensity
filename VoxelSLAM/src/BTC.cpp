@@ -8,25 +8,25 @@ void read_parameters(ros::NodeHandle &nh, ConfigSetting &config_setting, int isH
     config_setting.plane_merge_normal_thre_ = 0.1; 
     config_setting.plane_merge_dis_thre_ = 0.3;
     config_setting.plane_detection_thre_ = 0.01;
-    config_setting.voxel_size_ = 1; // adjust
-    config_setting.voxel_init_num_ = 10;
+    config_setting.voxel_size_ = 0.25; // adjust
+    config_setting.voxel_init_num_ = 8;
     config_setting.proj_plane_num_ = 2; // adjust
-    config_setting.proj_image_resolution_ = 0.5;
-    config_setting.proj_image_high_inc_ = 0.1;
+    config_setting.proj_image_resolution_ = 0.1;
+    config_setting.proj_image_high_inc_ = 0.025;
     config_setting.proj_dis_min_ = 0;
-    config_setting.proj_dis_max_ = 5;
+    config_setting.proj_dis_max_ = 3;
     config_setting.summary_min_thre_ = 10;
     config_setting.line_filter_enable_ = 1;
     config_setting.touch_filter_enable_ = 0;
 
     config_setting.descriptor_near_num_ = 15; // adjust
-    config_setting.descriptor_min_len_ = 2;
-    config_setting.descriptor_max_len_ = 50; // adjust
+    config_setting.descriptor_min_len_ = 0.5;
+    config_setting.descriptor_max_len_ = 15; // adjust
     config_setting.non_max_suppression_radius_ = 2;
     config_setting.std_side_resolution_ = 0.2;
 
-    config_setting.skip_near_num_ = 30;
-    config_setting.candidate_num_ = 20;
+    config_setting.skip_near_num_ = 15;
+    config_setting.candidate_num_ = 10;
     config_setting.rough_dis_threshold_ = 0.01;
     config_setting.similarity_threshold_ = 0.7;
     config_setting.icp_threshold_ = 0.15;

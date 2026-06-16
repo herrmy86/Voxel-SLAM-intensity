@@ -1,36 +1,42 @@
 General:
   lid_topic: "/livox/lidar"
   imu_topic: "/livox/imu"
-  save_path: "/home/zale/save_datas/"
+  save_path: "/mnt/c/MVS/TestingatHome/voxel/"
   previous_map: ""
-  bagname: "mid360_init"
+  bagname: "small-full-asscii"
   lidar_type: 0
   blind: 0.5 # 0.5
-  point_filter_num: 3
+  point_filter_num: 1
   extrinsic_tran: [-0.011, -0.02329, 0.04412]
   extrinsic_rota: [1, 0, 0,
                    0, 1, 0,
                    0, 0, 1]
-  is_save_map: 0
+  is_save_map: 1
+  is_save_undistorted: 1
 
 Odometry:
   max_init: 30
   cov_gyr: 0.1
   cov_acc: 1
-  rdw_gyr: 0.0001
-  rdw_acc: 0.0001
+  rdw_gyr: 0.001
+  rdw_acc: 0.001
+  #rdw_gyr: 0.0001
+  #rdw_acc: 0.0001
   # down_size: 0.5
-  down_size: 0.1
-  dept_err: 0.02
-  beam_err: 0.05
+  down_size: 0.05
+ # dept_err: 0.02
+ # beam_err: 0.05
+  dept_err: 0.04
+  beam_err: 0.1
   # voxel_size: 4
-  voxel_size: 1
-  min_eigen_value: 0.0025
+  voxel_size: 0.5
+  #min_eigen_value: 0.0025
+  min_eigen_value: 0.025
   degrade_bound: 10
   point_notime: 0
 
 LocalBA:
-  win_size: 10
+  win_size: 2
   max_layer: 2
   cov_gyr: 0.01
   cov_acc: 2
@@ -42,9 +48,14 @@ LocalBA:
   thread_num: 5
 
 Loop:
-  jud_default: 0.45
+  jud_default: 0.5
   icp_eigval: 9
-  ratio_drift: 0.01
+  ratio_drift: 0.05
+  curr_halt: 5
+  prev_halt: 5
+  acsize: 5
+  mgsize: 5
+  isHighFly: 0
 
 GBA:
   voxel_size: 2
